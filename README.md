@@ -12,6 +12,8 @@ A zero-allocation Zig parser for the Hash-Block Configuration Format (HBCF). Par
 HBCF uses a simple block-based syntax:
 
 ```
+root_block = test
+
 >block_name
 key = value
 another_key = foo, bar, baz
@@ -21,6 +23,7 @@ setting = 42
 ```
 
 Features:
+
 - Comments with `#`
 - Comma-separated lists
 - Type coercion (bool, int, float, enum, string, slices)

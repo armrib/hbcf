@@ -1,0 +1,8 @@
+.{
+    .name = .hbcf,
+    .version = "0.0.0",
+    .fingerprint = 0x7e84e3b7c51feb6e,
+    .minimum_zig_version = "0.15.2",
+    .dependencies = .{},
+    .paths = .{ "build.zig", "build.zig.zon", "src" },
+}
