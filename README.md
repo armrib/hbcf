@@ -12,8 +12,7 @@ A zero-allocation Zig parser for the Hash-Block Configuration Format (HBCF). Par
 HBCF uses a simple block-based syntax:
 
 ```
-root_block = test
-
+root_key = value
 >block_name
 key = value
 another_key = foo, bar, baz

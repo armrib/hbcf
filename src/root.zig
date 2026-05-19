@@ -26,6 +26,19 @@ pub const Entry = struct {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Utility functions
+// ─────────────────────────────────────────────────────────────────────────────
+
+fn trimLine(s: []const u8) []const u8 {
+    var start: usize = 0;
+    var end: usize = s.len;
+    while (start < end and (s[start] == ' ' or s[start] == '\t')) : (start += 1) {}
+    while (end > start and (s[end - 1] == ' ' or s[end - 1] == '\t')) : (end -= 1) {}
+    if (start >= end) return "";
+    return s[start..end];
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Low-level line iterator. Zero-alloc. Branch-light.
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -53,21 +66,21 @@ pub const Iterator = struct {
 
             // Find end of physical line.
             const nl = std.mem.indexOfScalarPos(u8, self.src, self.cursor, '\n') orelse self.src.len;
-            var line = self.src[self.cursor..nl];
+            var raw_line = self.src[self.cursor..nl];
             self.cursor = nl + 1;
 
             // Strip CR for CRLF.
-            if (line.len > 0 and line[line.len - 1] == '\r') line = line[0 .. line.len - 1];
+            if (raw_line.len > 0 and raw_line[raw_line.len - 1] == '\r') raw_line = raw_line[0 .. raw_line.len - 1];
 
             // Strip inline comment.
-            if (std.mem.indexOfScalar(u8, line, '#')) |h| line = line[0..h];
+            if (std.mem.indexOfScalar(u8, raw_line, '#')) |h| raw_line = raw_line[0..h];
 
             // Trim horizontal whitespace.
-            line = std.mem.trim(u8, line, " \t");
+            const line = trimLine(raw_line);
             if (line.len == 0) continue;
 
             if (line[0] == '>') {
-                const ident = std.mem.trim(u8, line[1..], " \t");
+                const ident = trimLine(line[1..]);
                 if (ident.len == 0) return Error.InvalidSyntax;
                 if (!isValidIdent(ident)) return Error.InvalidSyntax;
                 self.block = ident;
@@ -76,11 +89,15 @@ pub const Iterator = struct {
             }
 
             const eq = std.mem.indexOfScalar(u8, line, '=') orelse return Error.InvalidSyntax;
-            const key = std.mem.trim(u8, line[0..eq], " \t");
-            const val = std.mem.trim(u8, line[eq + 1 ..], " \t");
+            const key = trimLine(line[0..eq]);
+            const val = trimLine(line[eq + 1 ..]);
             if (key.len == 0) return Error.InvalidSyntax;
             if (!isValidIdent(key)) return Error.InvalidSyntax;
-            if (!self.in_block) return Error.OrphanKeyValue;
+
+            // Allow root-level pairs; assign them to a default "" block
+            if (!self.in_block) {
+                self.block = "";
+            }
 
             return Item{ .pair = .{
                 .block = self.block,
@@ -176,7 +193,7 @@ pub fn parseList(out: [][]const u8, raw: []const u8) Error![][]const u8 {
     var it = std.mem.splitScalar(u8, raw, ',');
     while (it.next()) |part| {
         if (n == out.len) return Error.ListTooLong;
-        out[n] = std.mem.trim(u8, part, " \t");
+        out[n] = trimLine(part);
         n += 1;
     }
     return out[0..n];
@@ -376,7 +393,7 @@ fn assignFieldAlloc(
                     var idx: usize = 0;
                     var sit = std.mem.splitScalar(u8, raw, ',');
                     while (sit.next()) |part| : (idx += 1) {
-                        const trimmed = std.mem.trim(u8, part, " \t");
+                        const trimmed = trimLine(part);
                         buf[idx] = try parseValue(Child, trimmed);
                     }
                 }
@@ -476,10 +493,49 @@ test "iterator: basic blocks and pairs" {
     try testing.expect((try it.next()) == null);
 }
 
-test "iterator: orphan key" {
-    const src = "key = value\n>blk\n";
+test "iterator: root key" {
+    const src =
+        \\# This is a comment
+        \\root_key = 1
+        \\another_key = this is a test
+    ;
     var it = Iterator.init(src);
-    try testing.expectError(Error.OrphanKeyValue, it.next());
+    const p1 = (try it.next()).?;
+    try testing.expectEqualStrings("root_key", p1.pair.key);
+    try testing.expectEqualStrings("1", p1.pair.value);
+    const p2 = (try it.next()).?;
+    try testing.expectEqualStrings("another_key", p2.pair.key);
+    try testing.expectEqualStrings("this is a test", p2.pair.value);
+}
+
+test "iterator: root key (with space)" {
+    const src =
+        \\# This is a comment
+        \\
+        \\root_key = 1
+        \\
+        \\another_key = this is a test
+    ;
+    var it = Iterator.init(src);
+    const p1 = (try it.next()).?;
+    try testing.expectEqualStrings("root_key", p1.pair.key);
+    try testing.expectEqualStrings("1", p1.pair.value);
+    const p2 = (try it.next()).?;
+    try testing.expectEqualStrings("another_key", p2.pair.key);
+    try testing.expectEqualStrings("this is a test", p2.pair.value);
+}
+
+test "iterator: root and block keys" {
+    const src = "root_key = root_value\n>blk\nblk_key = blk_value\n";
+    var it = Iterator.init(src);
+    const p1 = (try it.next()).?;
+    try testing.expectEqualStrings("", p1.pair.block);
+    try testing.expectEqualStrings("root_key", p1.pair.key);
+    const b = (try it.next()).?;
+    try testing.expectEqualStrings("blk", b.block);
+    const p2 = (try it.next()).?;
+    try testing.expectEqualStrings("blk", p2.pair.block);
+    try testing.expectEqualStrings("blk_key", p2.pair.key);
 }
 
 test "iterator: invalid syntax — missing =" {
@@ -667,4 +723,3 @@ test "parseIntoAlloc: mixed fixed + dynamic + scalar" {
     try testing.expectEqualStrings("prod", cfg.build.tags[1]);
     try testing.expectEqualStrings("", cfg.build.tags[2]);
 }
-
